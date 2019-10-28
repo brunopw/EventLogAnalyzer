@@ -1,1 +1,3 @@
 # EventLogAnalyzer
+
+Execute RunEventLogAnalyzer.bat

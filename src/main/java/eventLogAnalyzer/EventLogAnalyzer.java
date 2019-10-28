@@ -30,7 +30,9 @@ public class EventLogAnalyzer {
 	private Connection getConnection() {
     	try {
     		Connection conn = DriverManager.getConnection(db, user, password);
-    		conn.setAutoCommit(true);
+    		if (conn != null) {
+    			conn.setAutoCommit(true);
+    		}
 			return conn;
 		} catch (SQLException e) {
 			System.err.println(e.getMessage());
@@ -51,51 +53,52 @@ public class EventLogAnalyzer {
 	private void insertOrUpdateEvent(Event event) {
         try {
         	Connection conn = getConnection();
-    		
-        	synchronized (EventLogAnalyzer.class) {
-	    		if (selectEventByIdUsingConnection(conn, event.getId())) {
-	    			if (event.getState().equals(State.FINISHED) && durationNotUpdatedByIdUsingConnection(conn, event.getId()) ) {
-		    			List<Event> filteredEvents = sortedEventsList.stream()
-		                .filter(ev -> ev.getId().equals(event.getId()))
-		                .collect(Collectors.toList());
-		    			
-		    			// Remove the duplicates events
-		    			HashSet<Object> seen = new HashSet<>();
-		    			filteredEvents.removeIf(e -> ! seen.add(e.getId() + e.getState().name()));
-		    			
-		    			long duration = 0;
-		    			if(filteredEvents.size() > 1) {
-		    				duration = Math.abs(filteredEvents.get(0).getTimestamp().getTime() - filteredEvents.get(1).getTimestamp().getTime());
+        	if (conn != null) {
+	        	synchronized (EventLogAnalyzer.class) {
+		    		if (selectEventByIdUsingConnection(conn, event.getId())) {
+		    			if (event.getState().equals(State.FINISHED) && durationNotUpdatedByIdUsingConnection(conn, event.getId()) ) {
+			    			List<Event> filteredEvents = sortedEventsList.stream()
+			                .filter(ev -> ev.getId().equals(event.getId()))
+			                .collect(Collectors.toList());
+			    			
+			    			// Remove the duplicates events
+			    			HashSet<Object> seen = new HashSet<>();
+			    			filteredEvents.removeIf(e -> ! seen.add(e.getId() + e.getState().name()));
+			    			
+			    			long duration = 0;
+			    			if(filteredEvents.size() > 1) {
+			    				duration = Math.abs(filteredEvents.get(0).getTimestamp().getTime() - filteredEvents.get(1).getTimestamp().getTime());
+			    			}
+			    			
+			    			String sql = "UPDATE Event SET duration = ?, " +
+			    										  "alert = ?     " +
+								    	 " WHERE id = ?";
+							
+							PreparedStatement pstmt = conn.prepareStatement(sql);
+							pstmt.setTimestamp(1, new Timestamp(duration));
+							pstmt.setBoolean(2, duration > 4 ? true : false);
+							pstmt.setString(3, event.getId());
+			
+							pstmt.executeUpdate();
+				
+							pstmt.close();	   
 		    			}
-		    			
-		    			String sql = "UPDATE Event SET duration = ?, " +
-		    										  "alert = ?     " +
-							    	 " WHERE id = ?";
+		    		} else {
+			        	String sql = "INSERT INTO Event (id, type, host, alert) " +
+							    " VALUES (?,?,?,?)";
 						
 						PreparedStatement pstmt = conn.prepareStatement(sql);
-						pstmt.setTimestamp(1, new Timestamp(duration));
-						pstmt.setBoolean(2, duration > 4 ? true : false);
-						pstmt.setString(3, event.getId());
-		
+						pstmt.setString(1, event.getId());
+						pstmt.setString(2, event.getType());
+						pstmt.setString(3, event.getHost());
+						pstmt.setBoolean(4, false);
+						
 						pstmt.executeUpdate();
 			
-						pstmt.close();	   
-	    			}
-	    		} else {
-		        	String sql = "INSERT INTO Event (id, type, host, alert) " +
-						    " VALUES (?,?,?,?)";
-					
-					PreparedStatement pstmt = conn.prepareStatement(sql);
-					pstmt.setString(1, event.getId());
-					pstmt.setString(2, event.getType());
-					pstmt.setString(3, event.getHost());
-					pstmt.setBoolean(4, false);
-					
-					pstmt.executeUpdate();
-		
-					pstmt.close();	         
-		        }
-    		}
+						pstmt.close();	         
+			        }
+	    		}
+        	}
         }
         catch (SQLException e) {
             System.err.println(e.getMessage());
@@ -154,22 +157,23 @@ public class EventLogAnalyzer {
 	private void selectEventTable() {
 		try {
         	Connection conn = getConnection();
-
-        	Statement stmt = conn.createStatement();
-            ResultSet rs =  stmt.executeQuery("select * from EVENT");
-             
-            System.out.println("----------");
-            while(rs.next()) {
-                System.out.println("Event: " + rs.getString("ID") + 
-                		" " + rs.getTimestamp("DURATION") + 
-                		" " + rs.getString("TYPE") + 
-                		" " + rs.getString("HOST") +
-                		" " + rs.getString("ALERT"));
-            }
-            System.out.println("----------");
-            
-            rs.close();
-            stmt.close();
+        	if (conn != null) {
+	        	Statement stmt = conn.createStatement();
+	            ResultSet rs =  stmt.executeQuery("select * from EVENT");
+	             
+	            System.out.println("----------");
+	            while(rs.next()) {
+	                System.out.println("Event: " + rs.getString("ID") + 
+	                		" " + rs.getTimestamp("DURATION") + 
+	                		" " + rs.getString("TYPE") + 
+	                		" " + rs.getString("HOST") +
+	                		" " + rs.getString("ALERT"));
+	            }
+	            System.out.println("----------");
+	            
+	            rs.close();
+	            stmt.close();
+        	}
         }
         catch (SQLException e) {
             System.err.println(e.getMessage());
@@ -182,22 +186,23 @@ public class EventLogAnalyzer {
 	private void selectAlertEvents() {
 		try {
         	Connection conn = getConnection();
-
-        	Statement stmt = conn.createStatement();
-            ResultSet rs =  stmt.executeQuery("select * from EVENT where ALERT = TRUE");
-             
-            System.out.println("------More than 4ms Events------");
-            while(rs.next()) {
-                System.out.println(rs.getString("ID") + 
-                		" " + rs.getTimestamp("DURATION") + 
-                		" " + rs.getString("TYPE") + 
-                		" " + rs.getString("HOST") + 
-                		" " + rs.getString("ALERT")); 
-            }
-            System.out.println("--------------------------------");
-            
-            rs.close();
-            stmt.close();
+        	if (conn != null) {
+	        	Statement stmt = conn.createStatement();
+	            ResultSet rs =  stmt.executeQuery("select * from EVENT where ALERT = TRUE");
+	             
+	            System.out.println("------More than 4ms Events------");
+	            while(rs.next()) {
+	                System.out.println(rs.getString("ID") + 
+	                		" " + rs.getTimestamp("DURATION") + 
+	                		" " + rs.getString("TYPE") + 
+	                		" " + rs.getString("HOST") + 
+	                		" " + rs.getString("ALERT")); 
+	            }
+	            System.out.println("--------------------------------");
+	            
+	            rs.close();
+	            stmt.close();
+        	}
         }
         catch (SQLException e) {
             System.err.println(e.getMessage());
@@ -210,11 +215,12 @@ public class EventLogAnalyzer {
 	private void dropTable() {
 		try {
         	Connection conn = getConnection();
-
-        	Statement stmt = conn.createStatement();
-	        stmt.execute("DROP TABLE event");
-	        
-	        stmt.close();
+        	if (conn != null) {
+	        	Statement stmt = conn.createStatement();
+		        stmt.execute("DROP TABLE event");
+		        
+		        stmt.close();
+	        }
         }
         catch (SQLException e) {
             System.err.println(e.getMessage());
@@ -227,11 +233,12 @@ public class EventLogAnalyzer {
 	private void deleteTable() {
 		try {
         	Connection conn = getConnection();
-
-        	Statement stmt = conn.createStatement();
-	        stmt.execute("DELETE FROM event");
-	        
-	        stmt.close();
+        	if (conn != null) {
+	        	Statement stmt = conn.createStatement();
+		        stmt.execute("DELETE FROM event");
+		        
+		        stmt.close();
+        	}
         }
         catch (SQLException e) {
             System.err.println(e.getMessage());
@@ -247,17 +254,18 @@ public class EventLogAnalyzer {
 		dropTable();
         try {
         	Connection conn = getConnection();
-
-        	Statement stmt = conn.createStatement();
-	        stmt.execute("CREATE TABLE IF NOT EXISTS event ( " + 
-						"id VARCHAR(255)," + 
-						"duration TIMESTAMP," + 
-						"type VARCHAR(100)," + 
-						"host VARCHAR(255)," + 
-						"alert BOOLEAN" + 
-						" )");
-	        
-	        stmt.close();
+        	if (conn != null) {
+	        	Statement stmt = conn.createStatement();
+		        stmt.execute("CREATE TABLE IF NOT EXISTS event ( " + 
+							"id VARCHAR(255)," + 
+							"duration TIMESTAMP," + 
+							"type VARCHAR(100)," + 
+							"host VARCHAR(255)," + 
+							"alert BOOLEAN" + 
+							" )");
+		        
+		        stmt.close();
+        	}
         }
         catch (SQLException e) {
             System.err.println(e.getMessage());
@@ -271,23 +279,25 @@ public class EventLogAnalyzer {
 			throws JsonGenerationException, JsonMappingException, IOException, SQLException, 
 			ClassNotFoundException {
 		
-		EventLogAnalyzer ela = new EventLogAnalyzer();
-		ela.populateSortedEventsList();
-		ela.sortedEventsList.forEach(e -> System.out.println(e.getId() + " - " + e.getState()));
-		
-		ela.createTable();
-        
-		for (int i = 0; i < ela.sortedEventsList.size(); i++) {
-			ela.insertOrUpdateEvent(ela.sortedEventsList.get(i));
+		if (args != null && args.length > 0) {
+			EventLogAnalyzer ela = new EventLogAnalyzer();
+			ela.populateSortedEventsList(args[0]);
+			ela.sortedEventsList.forEach(e -> System.out.println(e.getId() + " - " + e.getState()));
+			
+			ela.createTable();
+			
+			for (int i = 0; i < ela.sortedEventsList.size(); i++) {
+				ela.insertOrUpdateEvent(ela.sortedEventsList.get(i));
+			}
+			//ela.selectEventTable();
+			ela.selectAlertEvents();
 		}
-		//ela.selectEventTable();
-		ela.selectAlertEvents();
 	}
 
-	private void populateSortedEventsList() throws IOException {
+	private void populateSortedEventsList(String path) throws IOException {
 		ObjectMapper mapper = new ObjectMapper();
 
-		MappingIterator<Event> eventMap = mapper.readerFor(Event.class).readValues(new File("logfile.txt"));
+		MappingIterator<Event> eventMap = mapper.readerFor(Event.class).readValues(new File(path));
 
 		this.sortedEventsList = eventMap.readAll().stream().sorted(Comparator.comparing(Event::getState))
 				.sorted(Comparator.comparing(Event::getId)).collect(Collectors.toList());
